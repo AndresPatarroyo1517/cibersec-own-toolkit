@@ -114,7 +114,7 @@ class HostDiscoverer:
         all_results: List[Dict] = []
         #ARP es más rápido por lo que va primero
         if 'arp' in methods:
-            arp_results = self._scan_arp()
+            arp_results = self.scan_arp()
             for host in arp_results:
                 if host['ip'] not in discovered_ips:
                     discovered_ips.add(host['ip'])
