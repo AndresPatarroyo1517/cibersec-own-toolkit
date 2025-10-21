@@ -1,4 +1,5 @@
 from host_discovery import HostDiscoverer
+from port_scanner import PortScanner
 import asyncio
 
 def print_banner():
@@ -15,10 +16,13 @@ def print_banner():
 
 async def main():
     print_banner()
-    targets = "10.0.0.0/16"
-    discoverer = HostDiscoverer(targets)
-    hosts = await discoverer.discover(['arp', 'icmp', 'syn'])
-    print(hosts)
+    targets = "127.0.0.1"
+    #discoverer = HostDiscoverer(targets)
+    banner = PortScanner(targets)
+    host = banner.get_banner(targets, port = '22')
+    #hosts = discoverer.discover(['arp', 'icmp', 'syn'])
+    #print(hosts)
+    print(host)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -19,6 +19,7 @@ MAX_WORKERS = 100
 
 class HostDiscoverer:
     """Escanea hosts activos en un rango CIDR usando ARP/ICMP/SYN."""
+
     def __init__(self, cidr_range: str):
         try:
             self.network = ip_network(cidr_range, strict=False)
@@ -114,7 +115,7 @@ class HostDiscoverer:
         all_results: List[Dict] = []
         #ARP es más rápido por lo que va primero
         if 'arp' in methods:
-            arp_results = self._scan_arp()
+            arp_results = self.scan_arp()
             for host in arp_results:
                 if host['ip'] not in discovered_ips:
                     discovered_ips.add(host['ip'])

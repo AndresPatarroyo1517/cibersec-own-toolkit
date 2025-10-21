@@ -1,59 +1,148 @@
 import json
 import csv
-from typing import List, Dict, Optional, Set
+import os
+from datetime import datetime, date
+from decimal import Decimal
+from typing import Any, Dict, List, Optional, Union
 import logging
-from datetime import datetime
 
-def save_results(results: List[Dict], output_format: str, base_path: str, 
-                 stats: Dict, logger: logging.Logger):
-    """
-    Guarda resultados en el formato especificado.
-    
-    Args:
-        results: Lista de hosts descubiertos
-        output_format: 'json', 'csv', o 'both'
-        base_path: Path base sin extensión
-        stats: Estadísticas del escaneo
-        logger: Logger para mensajes
-    """
-    import json
-    import csv
-    
-    # JSON
-    if output_format in ('json', 'both'):
-        json_path = f"{base_path}.json"
-        output_data = {
-            'metadata': {
-                'scan_time': datetime.now().isoformat(),
-                'statistics': stats
-            },
-            'hosts': results
-        }
-        
-        try:
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(output_data, f, indent=2, ensure_ascii=False)
-            logger.info(f"JSON guardado en: {json_path}")
-        except Exception as e:
-            logger.error(f"Error guardando JSON: {e}")
-    
-    # CSV
-    if output_format in ('csv', 'both'):
-        csv_path = f"{base_path}.csv"
-        
-        if not results:
-            logger.warning("No hay resultados para guardar en CSV")
-            return
-        
-        try:
-            # Determinar columnas dinámicamente
-            fieldnames = list(results[0].keys())
-            
-            with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(results)
-            
-            logger.info(f"CSV guardado en: {csv_path}")
-        except Exception as e:
-            logger.error(f"Error guardando CSV: {e}")
+def _ensure_dir_for_file(path: str) -> None:
+    folder = os.path.dirname(os.path.abspath(path))
+    if folder and not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
+
+def _convert_values(obj: Any) -> Any:
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _convert_values(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_convert_values(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_convert_values(v) for v in obj)
+    return obj
+
+def _write_json(payload: Any, path: str, logger: Optional[logging.Logger]=None) -> None:
+    try:
+        _ensure_dir_for_file(path)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        if logger:
+            logger.info("JSON guardado en: %s", path)
+    except Exception as e:
+        if logger:
+            logger.error("Error guardando JSON en %s: %s", path, e)
+        else:
+            raise
+
+def _write_dicts_csv(dicts: List[Dict], path: str, logger: Optional[logging.Logger]=None) -> None:
+    try:
+        _ensure_dir_for_file(path)
+        # union de keys
+        fieldnames = set()
+        for d in dicts:
+            if isinstance(d, dict):
+                fieldnames.update(d.keys())
+        # preferir orden conocido si existe
+        preferred = ["port", "state", "service", "version", "banner", "ip", "hostname"]
+        ordered = [k for k in preferred if k in fieldnames] + sorted(fieldnames - set(preferred))
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=ordered, extrasaction="ignore")
+            writer.writeheader()
+            for d in dicts:
+                # convertir None a "" para CSV
+                row = {k: ("" if d.get(k) is None else d.get(k)) for k in ordered}
+                writer.writerow(row)
+        if logger:
+            logger.info("CSV guardado en: %s", path)
+    except Exception as e:
+        if logger:
+            logger.error("Error guardando CSV en %s: %s", path, e)
+        else:
+            raise
+
+def _write_stats_csv(stats: Dict, path: str, logger: Optional[logging.Logger]=None) -> None:
+    try:
+        _ensure_dir_for_file(path)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["key", "value"])
+            for k, v in stats.items():
+                w.writerow([k, "" if v is None else v])
+        if logger:
+            logger.info("Stats CSV guardado en: %s", path)
+    except Exception as e:
+        if logger:
+            logger.error("Error guardando stats CSV en %s: %s", path, e)
+        else:
+            raise
+
+def save_results(
+    results: Union[Dict, List[Dict]],
+    output_format: str,
+    base_path: str,
+    stats: Dict,
+    logger: Optional[logging.Logger] = None
+) -> List[str]:
+    created_files: List[str] = []
+
+    try:
+        safe_results = _convert_values(results)
+        safe_stats = _convert_values(stats or {})
+
+        if output_format in ("json", "both"):
+            json_path = f"{base_path}.json"
+            payload = {
+                "metadata": {
+                    "scan_time": datetime.now().isoformat(),
+                },
+                "results": safe_results,
+                "statistics": safe_stats
+            }
+            _write_json(payload, json_path, logger)
+            created_files.append(json_path)
+
+        if output_format in ("csv", "both"):
+            # Si results es dict y contiene 'ports' -> crear CSV de puertos
+            if isinstance(safe_results, dict) and isinstance(safe_results.get("ports"), list):
+                ports = safe_results.get("ports", [])
+                ports_csv = f"{base_path}_ports.csv"
+                if ports:
+                    _write_dicts_csv(ports, ports_csv, logger)
+                    created_files.append(ports_csv)
+                else:
+                    # crear archivo vacío con header si quieres, o solo guardar stats
+                    with open(ports_csv, "w", newline="", encoding="utf-8") as f:
+                        pass
+                    if logger:
+                        logger.warning("No se encontraron puertos para escribir en %s (archivo vacío creado)", ports_csv)
+                    created_files.append(ports_csv)
+
+            # Si results es lista -> escribir esa lista como CSV (hosts)
+            elif isinstance(safe_results, list) and safe_results:
+                hosts_csv = f"{base_path}_hosts.csv"
+                _write_dicts_csv(safe_results, hosts_csv, logger)
+                created_files.append(hosts_csv)
+            elif isinstance(safe_results, list) and not safe_results:
+                # crear archivo vacío
+                hosts_csv = f"{base_path}_hosts.csv"
+                with open(hosts_csv, "w", newline="", encoding="utf-8") as f:
+                    pass
+                if logger:
+                    logger.warning("Lista de hosts vacía, creado %s (vacío)", hosts_csv)
+                created_files.append(hosts_csv)
+
+            # Siempre escribir stats CSV
+            stats_csv = f"{base_path}_stats.csv"
+            _write_stats_csv(safe_stats, stats_csv, logger)
+            created_files.append(stats_csv)
+
+    except Exception as e:
+        if logger:
+            logger.error("Error guardando resultados: %s", e)
+        else:
+            raise
+
+    return created_files
