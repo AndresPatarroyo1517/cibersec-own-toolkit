@@ -2,3 +2,6 @@
 *.log
 *.pyc
 *.json
+/reports
+/utilities
+/__pycache__

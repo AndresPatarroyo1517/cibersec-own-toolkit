@@ -8,8 +8,12 @@ import time
 from typing import List, Dict, Optional
 from datetime import datetime
 import os, sys
-sys.path.append(os.path.abspath("../utilities"))
-from save_results import save_results
+
+# Allow imports from project root
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from utilities.save_results import save_results
 
 conf.verb = 0
 
